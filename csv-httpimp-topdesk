@@ -1,0 +1,183 @@
+#!/usr/bin/env python3
+#
+# csv-httpimp-topdesk
+# 
+# Use this script to send HTTPrequests in batch to TOPdesk
+# Suitable for sending complex strings, based on a csv source file.
+# Written by Rogier Visser (Laansloot IT), 15 december 2019.
+#
+#
+# Usage:
+# 1. Set variables url and user (see below)
+# 2. Set the first part of the HTTPrequest in file csv1-card.
+# 3. Csv-file with headers is file csv2-source.
+# 4. Refer to linked tables in the header with / (for example vestigingid/naam)
+# 5. Run the script. If SAAS, answer Y to question "New architecture? (y/n)"
+#
+#
+# Example:
+#
+# csv1-card:	branch?status=1&action=
+# csv2-source:	naam;debiteurennummer;vrijeopzoek1/naam
+#				TOPdesk UK;1;1 - Lineair
+#				TOPdesk Nederland;2;1 - Lineair
+#
+#
+
+url = "https://yourtopdesk.topdesk.net"
+user = "HTTPUSER"
+
+
+#
+# Step 1: Set functions
+#
+
+import requests, urllib.parse, os
+from http.cookiejar import LWPCookieJar
+from getpass import getpass
+from lxml import etree, html
+
+def getcookie_newarch(url, user, passwd):
+	pls=requests.Session()
+	pls.cookies = LWPCookieJar('logincookie.txt')
+	
+	headers = {"Connection" : "keep-alive"}
+	page = pls.get(url + "/tas/secure/login/form", headers=headers)
+	tree = html.fromstring(page.content)
+	csrftoken = tree.find('.//input[@name="csrf-token"]').value
+		
+	headers = {"Content-Type" : "application/x-www-form-urlencoded", "Connection" : "keep-alive", "Referer" : url + "/tas/secure/login/form"}
+	data = {"form_username" : user, "form_password" : passwd, "csrf-token" : csrftoken, "j_redirecturl" : ""}
+	data = urllib.parse.urlencode(data, quote_via=urllib.parse.quote)
+	page = pls.post(url + "/tas/secure/login/verify/", data=data, headers=headers)
+	
+	headers = {"Content-Type" : "application/x-www-form-urlencoded", "Connection" : "keep-alive", "Referer" : url + "/tas/secure/index.jsp"}
+	data = {"topdeskidploginforwardurl" : url + "/tas/secure/index.jsp"}
+	data = urllib.parse.urlencode(data, quote_via=urllib.parse.quote)
+	page = pls.post(url + "/passlayer-idp", data=data, headers=headers)
+	tree = html.fromstring(page.content)
+	sessiontoken = tree.find('.//input[@name="jwt"]').value
+
+	headers = {"Content-Type" : "application/x-www-form-urlencoded", "Connection" : "keep-alive", "Referer" : url + "/tas/secure/idp"}
+	data = {"jwt" : sessiontoken}
+	data = urllib.parse.urlencode(data, quote_via=urllib.parse.quote)
+	page = pls.post(url + "/services/authenticate/token/createSession", data=data, headers=headers)
+	pls.cookies.save(ignore_discard=True)
+	
+	for cookie in pls.cookies:
+		if cookie.name == "authsession":
+			 print("Successfully created session " + cookie.value)
+			 return cookie.value
+
+def getcookie_lgcy(url, user, passwd):
+	pls=requests.Session()
+	pls.cookies = LWPCookieJar("logincookie.txt")
+	data = {"j_username" : user, "j_password" : passwd}
+	data = "?" + urllib.parse.urlencode(data, quote_via=urllib.parse.quote)
+	page = pls.post(url + "/tas/secure" + data)
+	pls.cookies.save(ignore_discard=True)
+
+def createstring_new(column, key, value):
+	if "/" in key:
+		mapping = key.split("/")
+		replacefield = mapping[0]
+		searchfield = mapping[1]
+		string = { "replacefield" + str(column) : replacefield, "searchfield" + str(column) : searchfield, "searchvalue" + str(column) : value}
+		string = "&" + urllib.parse.urlencode(string, quote_via=urllib.parse.quote)
+		return string
+	else:
+		string = { "field" + str(column) : key, "value" + str(column) : value}
+		string = "&" + urllib.parse.urlencode(string, quote_via=urllib.parse.quote)
+		return string
+
+def createstring_edit(column, key, value):
+	if column == 0:
+		string = { "lookup" : key, "lookupValue" : value}
+		string = "&" + urllib.parse.urlencode(string, quote_via=urllib.parse.quote)
+		return string
+	else:
+		column = column - 1
+		if "/" in key:
+			mapping = key.split("/")
+			replacefield = mapping[0]
+			searchfield = mapping[1]
+			string = { "replacefield" + str(column) : replacefield, "searchfield" + str(column) : searchfield, "searchvalue" + str(column) : value}
+			string = "&" + urllib.parse.urlencode(string, quote_via=urllib.parse.quote)
+			return string
+		else:
+			string = { "field" + str(column) : key, "value" + str(column) : value}
+			string = "&" + urllib.parse.urlencode(string, quote_via=urllib.parse.quote)
+			return string
+
+def exec_http(url, card, new_edit):
+	reqses = requests.Session()
+	reqses.cookies = LWPCookieJar("logincookie.txt")
+	reqses.cookies.load(ignore_discard=True, ignore_expires=True)
+	for line in lines[1:]:
+		values = line.strip().split(";")
+		string = ""
+		for column in range(len(keys)):
+			key = keys[column]
+			value = values[column]
+			if new_edit == "new":
+				string = string + createstring_new(column, key, value)
+			if new_edit == "edit":
+				string = string + createstring_edit(column, key, value)
+		compl_url = url + "/tas/secure/" + card + new_edit + string + "&validate=false&save=true"
+		req = reqses.get(compl_url)			
+
+
+#
+# Step 2: preparations
+#
+
+print("----- HTTPrequests to process -----")
+new_edit = input("New or edit? (new/edit): ")
+print("")
+
+fname1 = "csv1-card"
+with open(fname1, "r") as fname1:
+	card = fname1.read().strip()
+
+fname2 = "csv2-source"
+with open(fname2, "r") as fname2:
+	lines = fname2.readlines()
+	keys = lines[0].strip().split(";")
+
+for line in lines[1:]:
+	values = line.strip().split(";")
+	string = ""
+	for column in range(len(keys)):
+		key = keys[column]
+		value = values[column]
+		if new_edit == "new":
+			string = string + createstring_new(column, key, value)
+		if new_edit == "edit":
+			string = string + createstring_edit(column, key, value)
+	compl_url = url + "/tas/secure/" + card + new_edit + string + "&validate=false&save=true"
+	print(compl_url)
+	
+print("")
+print("----- Connectivity ----------------")
+print("     Url: " + url)
+print("Username: " + user)
+importeren = input("Import? (y/n): ")
+
+
+#
+# Step 3: execute httprequests
+#
+
+if importeren == ("y" or "Y"):
+	newarch = input("New architecture? (y/n): ")
+	passwd = getpass("Password: ")
+	print("----- Sending HTTPrequests --------")
+	if newarch == ("y" or "y"):
+		getcookie_newarch(url,user,passwd)
+		exec_http(url,card,new_edit)
+	else:
+		getcookie_lgcy(url,user,passwd)
+		exec_http(url,card,new_edit)
+	os.remove("logincookie.txt")
+else:
+	print("No data is transferred.")
