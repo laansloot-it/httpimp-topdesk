@@ -121,7 +121,9 @@ importeren = input("Import? (y/n): ")
 if importeren == ("y" or "Y"):
 	newarch = input("New architecture? (y/n): ")
 	passwd = getpass("Password: ")
+	print("")
 	print("----- Sending HTTPrequests --------")
+	print("")
 	if newarch == ("y" or "y"):
 		getcookie_newarch(url,user,passwd)
 		exec_http(url,card,string)		
