@@ -81,9 +81,9 @@ def exec_http(url, card, string):
 	reqses = requests.Session()
 	reqses.cookies = LWPCookieJar("logincookie.txt")
 	reqses.cookies.load(ignore_discard=True, ignore_expires=True)
-	fname2 = "str3-var"
-	with open(fname2, "r") as fname2:
-		for line in fname2.readlines():
+	fname3 = "str3-var"
+	with open(fname3, "r") as fname3:
+		for line in fname3.readlines():
 			compl_url = url + "/tas/secure/" + card + urllib.parse.quote(line.strip()) + string + "&validate=false&save=true"
 			req = reqses.get(compl_url)
 
@@ -97,13 +97,13 @@ fname1 = "str1-card"
 with open(fname1, "r") as fname1:
 	card = fname1.read().strip()
 
-fname3 = "str2-string"
-with open(fname3, "r") as fname3:
-	string = fname3.read().strip()
-
-fname2 = "str3-var"
+fname2 = "str2-string"
 with open(fname2, "r") as fname2:
-	for line in fname2.readlines():
+	string = fname2.read().strip()
+
+fname3 = "str3-var"
+with open(fname3, "r") as fname3:
+	for line in fname3.readlines():
 		compl_url = url + "/tas/secure/" + card + urllib.parse.quote(line.strip()) + string + "&validate=false&save=true"
 		print(compl_url)
 
